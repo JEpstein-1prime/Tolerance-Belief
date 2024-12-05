@@ -1,0 +1,614 @@
+# For Figure 1
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+# Parameters
+time_steps = 100  # Number of timesteps
+initial_belief = 0.5  # Initial belief
+external_signal_mean = 0.5  # Mean of the external signal
+external_signal_std = 0.15  # Standard deviation for variability
+epsilon = 1e-6  # Small constant to prevent divide-by-zero
+
+# Initialization
+x_t = [np.clip(initial_belief, 0, 1)]  # List to store beliefs
+x_t_e = np.clip(np.random.normal(external_signal_mean, external_signal_std, time_steps), 0, 1)  # External signals
+k_t_list = []  # Adjustment factors
+update_flags = []  # Track updates
+z_values = []  # Store z for analysis
+
+# Helper function for sigmoid
+def sigmoid(z):
+    return 1 / (1 + np.exp(-np.clip(z, -20, 20)))  # Clip z to prevent overflow
+
+# Simulation
+for t in range(1, time_steps):
+    current_belief = x_t[-1]
+    external_input = x_t_e[t]
+    
+    # Compute historical differences
+    deltas = np.diff(x_t)
+    delta_t = np.clip(np.mean(deltas), -1, 1) if len(deltas) > 0 else 0  # Average deviation
+    sigma_delta_i = max(np.std(deltas), epsilon) if len(deltas) > 0 else 1  # Standard deviation, avoid zero variance
+    
+    # Compute z (normalized gap)
+    z = ((external_input - current_belief) - delta_t) / (sigma_delta_i + epsilon)
+    z = np.clip(z, -5, 5)  # Ensure z is within a reasonable range
+    z_values.append(z)
+    
+    # Compute k_t using 1 - sig(z)
+    k_t = 1 - sigmoid(z)
+    k_t_list.append(k_t)
+    
+    # Decide whether to update
+    rand_draw = np.random.rand()
+    if rand_draw < k_t:
+        # Update belief
+        new_belief = np.clip(current_belief + k_t * (external_input - current_belief), 0, 1)
+        update_flags.append(True)
+    else:
+        # No update
+        new_belief = current_belief
+        update_flags.append(False)
+    
+    x_t.append(new_belief)
+    
+    # Debugging output
+    print(f"Time {t}: x_t={current_belief:.3f}, external_input={external_input:.3f}, "
+          f"z={z:.3f}, k_t={k_t:.3f}, rand_draw={rand_draw:.3f}, updated={update_flags[-1]}")
+
+# Visualization
+time = np.arange(time_steps)
+
+plt.figure(figsize=(15, 10))
+
+# Plot beliefs over time
+plt.subplot(2, 2, 1)
+plt.plot(time, x_t, label="$x_t$ (Beliefs)", color="blue")
+plt.title("Belief Over Time")
+plt.xlabel("Timestep")
+plt.ylabel("Belief ($x_t$)")
+plt.ylim(0, 1)
+plt.legend()
+
+# Plot external signal
+plt.subplot(2, 2, 2)
+plt.plot(time, x_t_e, label="$x_t^e$ (Random External Signal)", linestyle="--", color="green")
+plt.title("External Signal, $N(0.5, 0.15)$")
+plt.xlabel("Timestep")
+plt.ylabel("External Signal ($x_t^e$)")
+plt.ylim(0, 1)
+plt.legend()
+
+# Plot adjustment factors (k_t)
+plt.subplot(2, 2, 3)
+plt.plot(time[1:], k_t_list, label="$k_t = 1 - \\text{sig}(z)$", color="red")
+plt.title("Adjustment Factor ($k_t$)")
+plt.xlabel("Timestep")
+plt.ylabel("Adjustment Factor ($k_t$)")
+plt.ylim(0, 1)
+plt.legend()
+
+# Plot update flags
+plt.subplot(2, 2, 4)
+plt.stem(time[1:], update_flags, linefmt="C3-", markerfmt="C3o", basefmt="C3-")
+plt.title("Update Flags: Yes/No")
+plt.xlabel("Timestep")
+plt.ylabel("Update (1=Yes, 0=No)")
+plt.tight_layout()
+
+plt.show()
+
+
+
+
+
+
+
+
+
+# For Table 1
+
+# Column 1.  k_t = 1 - S(z_t)
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+np.random.seed(42) 
+
+# Parameters
+num_simulations = 1000
+time_steps = 100
+initial_belief = 0.5  # Initial belief
+memory_size = 5  # FILO memory size
+epsilon = 1e-6  # Small constant to prevent divide-by-zero
+
+# Initialize storage for results
+fixed_belief_positions = []
+num_updates_per_run = []
+elapsed_time_between_updates = []
+update_ranges = []
+one_minus_sig_z_stats = []
+average_update_sizes = []
+time_fixed_position_ratios = []  # New list to store the ratio
+
+# Helper function for sigmoid
+def sigmoid(z):
+    return 1 / (1 + np.exp(-np.clip(z, -20, 20)))  # Clip z to prevent overflow
+
+# Simulation
+for sim in range(num_simulations):
+    # Initialize memory with random beliefs
+    memory = list(np.clip(np.random.rand(memory_size), 0, 1))
+    x_t = memory.copy()  # Start beliefs
+    x_t_e = np.clip(np.random.normal(0.5, 0.15, time_steps), 0, 1)  # External signals
+    k_t_list = []  # Adjustment factors
+    z_values = []  # Store z for analysis
+    update_flags = []  # Track updates
+    updates = []  # Track when updates occur
+    update_sizes = []  # Track update magnitudes
+    
+    cumulative_fixed_time = 0  # Track total time spent in fixed positions
+
+    for t in range(memory_size, time_steps):
+        current_belief = x_t[-1]
+        external_input = x_t_e[t]
+        
+        # Compute historical differences
+        deltas = np.diff(x_t[-memory_size:])  # Use memory slice
+        delta_t = np.clip(np.mean(deltas), -1, 1) if len(deltas) > 0 else 0
+        sigma_delta_i = max(np.std(deltas), epsilon) if len(deltas) > 0 else 1
+        
+        # Compute z (normalized gap)
+        z = ((external_input - current_belief) - delta_t) / (sigma_delta_i + epsilon)
+        z = np.clip(z, -5, 5)
+        z_values.append(z)
+        
+        # Compute k_t
+        k_t = 1 - sigmoid(z)
+        k_t_list.append(k_t)
+        
+        # Update or not
+        rand_draw = np.random.rand()
+        if rand_draw < k_t:
+            # Calculate update size
+            update_size = abs(k_t * (external_input - current_belief))
+            update_sizes.append(update_size)
+            
+            # Apply update
+            new_belief = np.clip(current_belief + k_t * (external_input - current_belief), 0, 1)
+            update_flags.append(True)
+            updates.append(t)
+        else:
+            new_belief = current_belief
+            update_flags.append(False)
+            cumulative_fixed_time += 1  # Increment fixed time
+        
+        x_t.append(new_belief)
+    
+    # Compute statistics for the run
+    fixed_belief_positions.append(np.mean(np.array(update_flags)))
+    num_updates_per_run.append(len(updates))
+    
+    if len(updates) > 1:
+        elapsed_time_between_updates.append(np.mean(np.diff(updates)))
+    else:
+        elapsed_time_between_updates.append(0)  # No updates occurred
+    
+    if len(k_t_list) > 1:
+        update_ranges.append(max(k_t_list) - min(k_t_list))
+    else:
+        update_ranges.append(0)
+    
+    one_minus_sig_z_stats.append(np.mean([1 - sigmoid(z) for z in z_values]))
+    
+    # Calculate average update size
+    if update_sizes:
+        average_update_sizes.append(np.mean(update_sizes))
+    else:
+        average_update_sizes.append(0)  # No updates occurred
+    
+    # Calculate Time Fixed Position ÷ Updates Per Run
+    if len(updates) > 0:
+        ratio = cumulative_fixed_time / len(updates)
+        time_fixed_position_ratios.append(ratio)
+    else:
+        time_fixed_position_ratios.append(0)  # No updates occurred
+
+# Compute overall statistics
+avg_fixed_belief = np.mean(fixed_belief_positions)
+std_fixed_belief = np.std(fixed_belief_positions)
+
+avg_updates_per_run = np.mean(num_updates_per_run)
+avg_elapsed_time_between_updates = np.mean(elapsed_time_between_updates)
+
+avg_update_range = np.mean(update_ranges)
+std_update_range = np.std(update_ranges)
+
+avg_one_minus_sig_z = np.mean(one_minus_sig_z_stats)
+std_one_minus_sig_z = np.std(one_minus_sig_z_stats)
+
+avg_update_size = np.mean(average_update_sizes)
+std_update_size = np.std(average_update_sizes)
+
+avg_time_fixed_ratio = np.mean(time_fixed_position_ratios)
+std_time_fixed_ratio = np.std(time_fixed_position_ratios)
+
+# Print statistics
+print(f"Average Fixed Belief Position Per Run: {avg_fixed_belief:.4f} ± {std_fixed_belief:.4f}")
+print(f"Average Number of Updates Per Run: {avg_updates_per_run:.4f}")
+print(f"Average Elapsed Time Between Updates Per Run: {avg_elapsed_time_between_updates:.4f}")
+print(f"Average Update Range Per Run: {avg_update_range:.4f} ± {std_update_range:.4f}")
+print(f"1-S(z) Average ± SD: {avg_one_minus_sig_z:.4f} ± {std_one_minus_sig_z:.4f}")
+print(f"Average Update Size: {avg_update_size:.4f} ± {std_update_size:.4f}")
+print(f"Time Fixed Position ÷ Updates Per Run: {avg_time_fixed_ratio:.4f} ± {std_time_fixed_ratio:.4f}")
+
+
+
+
+# Column 2. k_t = fixed, 0.5
+
+# File: simulation_analysis.py
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Set seed for reproducibility
+np.random.seed(42)
+
+# Parameters
+NUM_SIMULATIONS = 1000
+TIME_STEPS = 100
+MEMORY_SIZE = 5  # FILO memory size
+EPSILON = 1e-6  # Small constant to prevent divide-by-zero
+FIXED_K_T = 0.5  # Fixed value for k_t
+
+# Initialize storage for results
+fixed_belief_positions = []
+num_updates_per_run = []
+elapsed_time_between_updates = []
+update_ranges = []
+one_minus_sig_z_stats = []
+time_fixed_position_ratio = []
+avg_update_sizes = []
+
+# Helper function for sigmoid
+def sigmoid(z):
+    return 1 / (1 + np.exp(-np.clip(z, -20, 20)))  # Prevent overflow
+
+# Simulation loop
+for sim in range(NUM_SIMULATIONS):
+    # Initialize memory and external signal
+    memory = list(np.clip(np.random.rand(MEMORY_SIZE), 0, 1))
+    x_t = memory.copy()
+    x_t_e = np.clip(np.random.normal(0.5, 0.15, TIME_STEPS), 0, 1)
+    
+    z_values = []
+    update_flags = []
+    updates = []
+    update_sizes = []
+    cumulative_fixed_time = 0
+
+    for t in range(MEMORY_SIZE, TIME_STEPS):
+        current_belief = x_t[-1]
+        external_input = x_t_e[t]
+        
+        # Historical differences and sigma computation
+        deltas = np.diff(x_t[-MEMORY_SIZE:])
+        delta_t = np.clip(np.mean(deltas), -1, 1) if len(deltas) > 0 else 0
+        sigma_delta_i = max(np.std(deltas), EPSILON) if len(deltas) > 0 else 1
+        
+        # Normalized gap z
+        z = ((external_input - current_belief) - delta_t) / (sigma_delta_i + EPSILON)
+        z = np.clip(z, -5, 5)
+        z_values.append(z)
+        
+        # Update decision based on fixed k_t
+        rand_draw = np.random.rand()
+        if rand_draw < FIXED_K_T:
+            new_belief = np.clip(current_belief + FIXED_K_T * (external_input - current_belief), 0, 1)
+            update_flags.append(True)
+            updates.append(t)
+            update_sizes.append(abs(new_belief - current_belief))
+        else:
+            new_belief = current_belief
+            update_flags.append(False)
+            cumulative_fixed_time += 1
+        
+        x_t.append(new_belief)
+    
+    # Compute statistics for the run
+    fixed_belief_positions.append(np.mean(np.array(update_flags)))
+    num_updates_per_run.append(len(updates))
+    elapsed_time_between_updates.append(np.mean(np.diff(updates)) if len(updates) > 1 else 0)
+    update_ranges.append(max(update_flags) - min(update_flags) if len(update_flags) > 1 else 0)
+    one_minus_sig_z_stats.append(np.mean([1 - sigmoid(z) for z in z_values]))
+    time_fixed_position_ratio.append(
+        max(cumulative_fixed_time / len(updates), 1) if updates else 1
+    )
+    avg_update_sizes.append(np.mean(update_sizes) if update_sizes else 0)
+
+# Compute overall statistics
+avg_fixed_belief = np.mean(fixed_belief_positions)
+std_fixed_belief = np.std(fixed_belief_positions)
+avg_updates_per_run = np.mean(num_updates_per_run)
+avg_elapsed_time_between_updates = np.mean(elapsed_time_between_updates)
+avg_update_range = np.mean(update_ranges)
+std_update_range = np.std(update_ranges)
+avg_one_minus_sig_z = np.mean(one_minus_sig_z_stats)
+std_one_minus_sig_z = np.std(one_minus_sig_z_stats)
+avg_fixed_time_ratio = np.mean(time_fixed_position_ratio)
+std_fixed_time_ratio = np.std(time_fixed_position_ratio)
+avg_update_size = np.mean(avg_update_sizes)
+std_update_size = np.std(avg_update_sizes)
+
+# Print statistics
+print(f"Average Fixed Belief Position Per Run: {avg_fixed_belief:.4f} ± {std_fixed_belief:.4f}")
+print(f"Average Number of Updates Per Run: {avg_updates_per_run:.4f}")
+print(f"Average Elapsed Time Between Updates Per Run: {avg_elapsed_time_between_updates:.4f}")
+print(f"Average Update Range Per Run: {avg_update_range:.4f} ± {std_update_range:.4f}")
+print(f"1-S(z) Average ± SD: {avg_one_minus_sig_z:.4f} ± {std_one_minus_sig_z:.4f}")
+print(f"Time Fixed Position ÷ Updates Per Run: {avg_fixed_time_ratio:.4f} ± {std_fixed_time_ratio:.4f}")
+print(f"Average Update Size Per Run: {avg_update_size:.4f} ± {std_update_size:.4f}")
+
+
+# Column 3. k_t = current belief minus average of all prior beliefs
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+np.random.seed(42) 
+
+# Parameters
+num_simulations = 1000
+time_steps = 100
+memory_size = 5  # FILO memory size
+epsilon = 1e-6  # Small constant to prevent divide-by-zero
+
+# Initialize storage for results
+fixed_belief_positions = []
+num_updates_per_run = []
+elapsed_time_between_updates = []
+update_ranges = []
+one_minus_sig_z_stats = []
+time_fixed_position_ratio = []
+average_update_sizes = []  # New: Track average update size per run
+
+# Helper function for sigmoid
+def sigmoid(z):
+    return 1 / (1 + np.exp(-np.clip(z, -20, 20)))  # Clip z to prevent overflow
+
+# Simulation
+for sim in range(num_simulations):
+    # Initialize memory with random beliefs
+    memory = list(np.clip(np.random.rand(memory_size), 0, 1))
+    x_t = memory.copy()  # Start beliefs
+    x_t_e = np.clip(np.random.normal(0.5, 0.15, time_steps), 0, 1)  # External signals
+    z_values = []  # Store z for analysis
+    update_flags = []  # Track updates
+    updates = []  # Track when updates occur
+    update_sizes = []  # New: Track update sizes
+    cumulative_fixed_time = 0  # Total time spent in fixed positions
+
+    for t in range(memory_size, time_steps):
+        current_belief = x_t[-1]
+        external_input = x_t_e[t]
+        
+        # Compute historical differences
+        deltas = np.diff(x_t[-memory_size:])  # Use memory slice
+        delta_t = np.clip(np.mean(deltas), -1, 1) if len(deltas) > 0 else 0
+        sigma_delta_i = max(np.std(deltas), epsilon) if len(deltas) > 0 else 1
+        
+        # Compute z (normalized gap)
+        z = ((external_input - current_belief) - delta_t) / (sigma_delta_i + epsilon)
+        z = np.clip(z, -5, 5)
+        z_values.append(z)
+        
+        # Compute k_t as current belief minus average of all prior beliefs
+        if len(x_t) > 1:
+            prior_average = np.mean(x_t[:-1])  # Average of all prior belief positions
+            k_t = np.clip(current_belief - prior_average, 0, 1)
+        else:
+            k_t = 0  # Default to 0 if no prior beliefs exist
+
+        # Update or not
+        rand_draw = np.random.rand()
+        if rand_draw < k_t:
+            new_belief = np.clip(current_belief + k_t * (external_input - current_belief), 0, 1)
+            update_flags.append(True)
+            updates.append(t)
+            update_sizes.append(abs(new_belief - current_belief))  # New: Record update size
+            cumulative_fixed_time = 0  # Reset fixed time
+        else:
+            new_belief = current_belief
+            update_flags.append(False)
+            cumulative_fixed_time += 1  # Increment fixed time
+        
+        x_t.append(new_belief)
+    
+    # Compute statistics for the run
+    fixed_belief_positions.append(np.mean(np.array(update_flags)))
+    num_updates_per_run.append(len(updates))
+    average_update_sizes.append(np.mean(update_sizes) if update_sizes else 0)  # New: Average update size
+
+    if len(updates) > 1:
+        elapsed_time_between_updates.append(np.mean(np.diff(updates)))
+    else:
+        elapsed_time_between_updates.append(0)  # No updates occurred
+    
+    if len(update_flags) > 1:
+        update_ranges.append(max(update_flags) - min(update_flags))
+    else:
+        update_ranges.append(0)
+    
+    one_minus_sig_z_stats.append(np.mean([1 - sigmoid(z) for z in z_values]))
+    
+    # Calculate ratio of time spent in fixed position to updates per run
+    if len(updates) > 0:
+        ratio = cumulative_fixed_time / len(updates)
+        time_fixed_position_ratio.append(max(ratio, 1))  # Ensure ratio is at least 1
+    else:
+        time_fixed_position_ratio.append(1)  # Default to 1 if no updates
+
+# Compute overall statistics
+avg_fixed_belief = np.mean(fixed_belief_positions)
+std_fixed_belief = np.std(fixed_belief_positions)
+
+avg_updates_per_run = np.mean(num_updates_per_run)
+avg_elapsed_time_between_updates = np.mean(elapsed_time_between_updates)
+
+avg_update_range = np.mean(update_ranges)
+std_update_range = np.std(update_ranges)
+
+avg_one_minus_sig_z = np.mean(one_minus_sig_z_stats)
+std_one_minus_sig_z = np.std(one_minus_sig_z_stats)
+
+avg_fixed_time_ratio = np.mean(time_fixed_position_ratio)
+std_fixed_time_ratio = np.std(time_fixed_position_ratio)
+
+avg_update_size = np.mean(average_update_sizes)  # New: Average update size
+std_update_size = np.std(average_update_sizes)  # New: Standard deviation of update size
+
+# Print statistics
+print(f"Average Fixed Belief Position Per Run: {avg_fixed_belief:.4f} ± {std_fixed_belief:.4f}")
+print(f"Average Number of Updates Per Run: {avg_updates_per_run:.4f}")
+print(f"Average Elapsed Time Between Updates Per Run: {avg_elapsed_time_between_updates:.4f}")
+print(f"Average Update Range Per Run: {avg_update_range:.4f} ± {std_update_range:.4f}")
+print(f"1-S(z) Average ± SD: {avg_one_minus_sig_z:.4f} ± {std_one_minus_sig_z:.4f}")
+print(f"Time Fixed Position ÷ Updates Per Run: {avg_fixed_time_ratio:.4f} ± {std_fixed_time_ratio:.4f}")
+print(f"Average Update Size: {avg_update_size:.4f} ± {std_update_size:.4f}")
+
+
+# Column 4. k_t = average position over all m
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+np.random.seed(42) 
+
+
+# Parameters
+num_simulations = 1000
+time_steps = 100
+memory_size = 5  # FILO memory size
+epsilon = 1e-6  # Small constant to prevent divide-by-zero
+
+# Initialize storage for results
+fixed_belief_positions = []
+num_updates_per_run = []
+elapsed_time_between_updates = []
+update_ranges = []
+one_minus_sig_z_stats = []
+time_fixed_position_ratio = []
+average_update_sizes = []  # New metric to store average update size per simulation
+
+# Helper function for sigmoid
+def sigmoid(z):
+    return 1 / (1 + np.exp(-np.clip(z, -20, 20)))  # Clip z to prevent overflow
+
+# Simulation
+for sim in range(num_simulations):
+    # Initialize memory with random beliefs
+    memory = list(np.clip(np.random.rand(memory_size), 0, 1))
+    x_t = memory.copy()  # Start beliefs
+    x_t_e = np.clip(np.random.normal(0.5, 0.15, time_steps), 0, 1)  # External signals
+    z_values = []  # Store z for analysis
+    update_flags = []  # Track updates
+    updates = []  # Track when updates occur
+    update_magnitudes = []  # Track sizes of updates
+    
+    # Variables to track fixed position time
+    cumulative_fixed_time = 0  # Total time spent in fixed positions
+
+    for t in range(memory_size, time_steps):
+        current_belief = x_t[-1]
+        external_input = x_t_e[t]
+        
+        # Compute historical differences
+        deltas = np.diff(x_t[-memory_size:])  # Use memory slice
+        delta_t = np.clip(np.mean(deltas), -1, 1) if len(deltas) > 0 else 0
+        sigma_delta_i = max(np.std(deltas), epsilon) if len(deltas) > 0 else 1
+        
+        # Compute z (normalized gap)
+        z = ((external_input - current_belief) - delta_t) / (sigma_delta_i + epsilon)
+        z = np.clip(z, -5, 5)
+        z_values.append(z)
+        
+        # Compute k_t as the average belief position over all m
+        k_t = np.clip(np.mean(x_t[-memory_size:]), 0, 1)
+
+        # Update or not
+        rand_draw = np.random.rand()
+        if rand_draw < k_t:
+            new_belief = np.clip(current_belief + k_t * (external_input - current_belief), 0, 1)
+            update_magnitudes.append(abs(new_belief - current_belief))  # Record update size
+            update_flags.append(True)
+            updates.append(t)
+            cumulative_fixed_time = 0  # Reset fixed time
+        else:
+            new_belief = current_belief
+            update_flags.append(False)
+            cumulative_fixed_time += 1  # Increment fixed time
+        
+        x_t.append(new_belief)
+    
+    # Compute statistics for the run
+    fixed_belief_positions.append(np.mean(np.array(update_flags)))
+    num_updates_per_run.append(len(updates))
+    
+    if len(updates) > 1:
+        elapsed_time_between_updates.append(np.mean(np.diff(updates)))
+    else:
+        elapsed_time_between_updates.append(0)  # No updates occurred
+    
+    if len(update_flags) > 1:
+        update_ranges.append(max(update_flags) - min(update_flags))
+    else:
+        update_ranges.append(0)
+    
+    one_minus_sig_z_stats.append(np.mean([1 - sigmoid(z) for z in z_values]))
+    
+    # Calculate ratio of time spent in fixed position to updates per run
+    if len(updates) > 0:
+        ratio = cumulative_fixed_time / len(updates)
+        time_fixed_position_ratio.append(max(ratio, 1))  # Ensure ratio is at least 1
+    else:
+        time_fixed_position_ratio.append(1)  # Default to 1 if no updates
+
+    # Compute average update size for the run
+    if len(update_magnitudes) > 0:
+        average_update_sizes.append(np.mean(update_magnitudes))
+    else:
+        average_update_sizes.append(0)  # No updates occurred
+
+# Compute overall statistics
+avg_fixed_belief = np.mean(fixed_belief_positions)
+std_fixed_belief = np.std(fixed_belief_positions)
+
+avg_updates_per_run = np.mean(num_updates_per_run)
+avg_elapsed_time_between_updates = np.mean(elapsed_time_between_updates)
+
+avg_update_range = np.mean(update_ranges)
+std_update_range = np.std(update_ranges)
+
+avg_one_minus_sig_z = np.mean(one_minus_sig_z_stats)
+std_one_minus_sig_z = np.std(one_minus_sig_z_stats)
+
+avg_fixed_time_ratio = np.mean(time_fixed_position_ratio)
+std_fixed_time_ratio = np.std(time_fixed_position_ratio)
+
+avg_update_size = np.mean(average_update_sizes)
+std_update_size = np.std(average_update_sizes)
+
+# Print statistics
+print(f"Average Fixed Belief Position Per Run: {avg_fixed_belief:.4f} ± {std_fixed_belief:.4f}")
+print(f"Average Number of Updates Per Run: {avg_updates_per_run:.4f}")
+print(f"Average Elapsed Time Between Updates Per Run: {avg_elapsed_time_between_updates:.4f}")
+print(f"Average Update Range Per Run: {avg_update_range:.4f} ± {std_update_range:.4f}")
+print(f"1-S(z) Average ± SD: {avg_one_minus_sig_z:.4f} ± {std_one_minus_sig_z:.4f}")
+print(f"Time Fixed Position ÷ Updates Per Run: {avg_fixed_time_ratio:.4f} ± {std_fixed_time_ratio:.4f}")
+print(f"Average Update Size: {avg_update_size:.4f} ± {std_update_size:.4f}")
